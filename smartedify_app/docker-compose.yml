@@ -1,0 +1,10 @@
+version: '3.8'
+
+services:
+  # Los servicios (gateway, identity, etc.) se definirán aquí.
+
+networks:
+  smartedify_net:
+
+volumes:
+  # Volúmenes de base de datos, etc.
