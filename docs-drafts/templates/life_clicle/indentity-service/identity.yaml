@@ -1,14 +1,16 @@
 openapi: 3.1.0
 info:
   title: SmartEdify Identity Service API
-  version: "4.3"
+  version: "4.4"
   summary: OIDC/OAuth2.1 + WebAuthn + DPoP + PBAC, multi-tenant/multi-región
   contact: { name: SmartEdify Platform Team }
 servers:
-  - url: https://auth.smartedify.global
-    description: Producción
-  - url: https://staging.auth.smartedify.global
-    description: Staging
+  - url: https://auth.smartedify.global/{tenant_id}
+    description: Emisor por tenant (cumple OIDC Discovery)
+    variables:
+      tenant_id:
+        default: default
+        description: Identificador del tenant utilizado como issuer y base de rutas
 tags:
   - name: Discovery
   - name: OAuth2/OIDC
@@ -18,7 +20,7 @@ tags:
   - name: Compliance/DSAR
   - name: Admin
 externalDocs:
-  description: OIDC metadata
+  description: OIDC Discovery 1.0
   url: https://openid.net/specs/openid-connect-discovery-1_0.html
 
 components:
@@ -28,8 +30,8 @@ components:
       description: Authorization Code + PKCE only. Implicit/Hybrid disabled.
       flows:
         authorizationCode:
-          authorizationUrl: https://auth.smartedify.global/authorize
-          tokenUrl: https://auth.smartedify.global/oauth/token
+          authorizationUrl: https://auth.smartedify.global/{tenant_id}/authorize
+          tokenUrl: https://auth.smartedify.global/{tenant_id}/oauth/token
           scopes:
             openid: OpenID scope
             profile: Perfil básico
@@ -41,20 +43,16 @@ components:
       description: JWT Access Token con header DPoP (RFC 9449). Access TTL ≤10m.
     mtls:
       type: mutualTLS
-      description: Autenticación de cliente para introspection/revoke (opaco) y M2M.
+      description: Autenticación de cliente para introspection/revoke y M2M.
     private_key_jwt:
       type: openIdConnect
-      openIdConnectUrl: https://auth.smartedify.global/.well-known/openid-configuration
-  parameters:
-    TenantId:
-      name: tenant_id
-      in: query
-      required: true
-      schema: { type: string, format: uuid }
-      description: Identificador del tenant
+      openIdConnectUrl: https://auth.smartedify.global/{tenant_id}/.well-known/openid-configuration
   headers:
     DPoP:
-      description: Prueba de posesión (RFC 9449). Se requiere en endpoints protegidos.
+      description: Prueba de posesión (RFC 9449). Requerido en endpoints protegidos.
+      schema: { type: string }
+    DPoP-Nonce:
+      description: Nonce recomendado para el siguiente intercambio DPoP
       schema: { type: string }
   schemas:
     Problem:
@@ -64,7 +62,12 @@ components:
         title: { type: string }
         status: { type: integer }
         detail: { type: string }
+        error: { type: string, description: Código detallado de error }
         traceId: { type: string }
+      examples:
+        invalid_dpop_proof: { value: { type: "about:blank", title: "Invalid DPoP", status: 401, error: "invalid_dpop_proof" } }
+        reused_refresh_token: { value: { type: "about:blank", title: "Refresh reuse detected", status: 401, error: "reused_refresh_token" } }
+        invalid_audience: { value: { type: "about:blank", title: "Invalid audience", status: 401, error: "invalid_aud" } }
     Jwks:
       type: object
       properties:
@@ -103,7 +106,7 @@ components:
         iat: { type: integer }
         nbf: { type: integer }
         sub: { type: string }
-        aud: { type: [string, array], items: { type: string } }
+        aud: { oneOf: [ { type: string }, { type: array, items: { type: string } } ] }
         iss: { type: string }
         jti: { type: string }
         cnf:
@@ -146,12 +149,8 @@ components:
         id: { type: string }
         rawId: { type: string }
         type: { type: string }
-        response:
-          type: object
-          additionalProperties: true
-        clientExtensionResults:
-          type: object
-          additionalProperties: true
+        response: { type: object, additionalProperties: true }
+        clientExtensionResults: { type: object, additionalProperties: true }
     ContextualTokenRequest:
       type: object
       required: [aud, event_id, location, ttl_seconds]
@@ -179,23 +178,36 @@ components:
         status: { type: string, enum: [accepted, processing, completed, failed] }
         created_at: { type: string, format: date-time }
 
+  # catálogo de errores recomendados
+  x-error-codes:
+    - invalid_dpop_proof
+    - dpop_nonce_required
+    - reused_refresh_token
+    - invalid_aud
+    - invalid_kid
+    - jwks_refresh_required
+    - policy_bundle_signature_invalid
+
 paths:
+
+  # --- OIDC Discovery compliant (issuer base en servers) ---
   /.well-known/openid-configuration:
     get:
       tags: [Discovery]
-      summary: OIDC Discovery por tenant
-      parameters: [ { $ref: '#/components/parameters/TenantId' } ]
+      summary: OIDC Discovery por tenant (basado en issuer path)
       responses:
         '200':
           description: Metadata OIDC
           content:
             application/json: { schema: { type: object } }
-        default: { description: Error, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default:
+          description: Error
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
   /.well-known/jwks.json:
     get:
       tags: [Discovery]
-      summary: JWKS por tenant (exposición de claves públicas activas)
-      parameters: [ { $ref: '#/components/parameters/TenantId' } ]
+      summary: JWKS por tenant (claves públicas activas)
       responses:
         '200':
           description: JWKS
@@ -203,6 +215,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Jwks' }
 
+  # --- OAuth2/OIDC ---
   /authorize:
     get:
       tags: [OAuth2/OIDC]
@@ -234,7 +247,6 @@ paths:
           name: code_challenge_method
           required: true
           schema: { type: string, enum: [S256] }
-        - { $ref: '#/components/parameters/TenantId' }
       responses:
         '302': { description: Redirección con code }
         default: { description: Error, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
@@ -281,17 +293,19 @@ paths:
         '200':
           description: Tokens emitidos
           headers:
-            DPoP-Nonce: { description: Nonce recomendado para siguiente intercambio, schema: { type: string } }
+            DPoP-Nonce: { $ref: '#/components/headers/DPoP-Nonce' }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TokenResponse' }
-        default: { description: Error, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default:
+          description: Error
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
 
   /oauth/introspect:
     post:
       tags: [OAuth2/OIDC]
-      summary: Introspección de tokens opacos (requiere mTLS o private_key_jwt)
-      security: [ { mtls: [] }, { private_key_jwt: [] } ]
+      summary: Introspección de tokens opacos (mTLS/private_key_jwt; DPoP opcional si token es PoP)
+      security: [ { mtls: [] }, { private_key_jwt: [] }, { dpop: [] } ]
       requestBody:
         required: true
         content:
@@ -304,6 +318,8 @@ paths:
       responses:
         '200':
           description: Estado del token
+          headers:
+            DPoP-Nonce: { $ref: '#/components/headers/DPoP-Nonce' }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/IntrospectionResponse' }
@@ -311,8 +327,8 @@ paths:
   /oauth/revoke:
     post:
       tags: [OAuth2/OIDC]
-      summary: Revocar refresh/access
-      security: [ { mtls: [] }, { private_key_jwt: [] } ]
+      summary: Revocar refresh/access (mTLS/private_key_jwt; DPoP opcional)
+      security: [ { mtls: [] }, { private_key_jwt: [] }, { dpop: [] } ]
       requestBody:
         required: true
         content:
@@ -323,7 +339,10 @@ paths:
                 token: { type: string }
                 token_type_hint: { type: string }
       responses:
-        '200': { description: OK }
+        '200':
+          description: OK
+          headers:
+            DPoP-Nonce: { $ref: '#/components/headers/DPoP-Nonce' }
 
   /oauth/device_authorization:
     post:
@@ -373,6 +392,7 @@ paths:
       responses:
         '200': { description: OK }
 
+  # --- Sessions ---
   /identity/v2/token/refresh:
     post:
       tags: [Sessions]
@@ -381,17 +401,20 @@ paths:
       responses:
         '200':
           description: Nuevo par de tokens
+          headers:
+            DPoP-Nonce: { $ref: '#/components/headers/DPoP-Nonce' }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TokenResponse' }
-        '401': { description: Reuse detectado, familia revocada }
+        '401':
+          description: Reuse detectado, familia revocada
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' }, examples: { reused_refresh_token: { $ref: '#/components/schemas/Problem/examples/reused_refresh_token' } } } }
 
   /identity/v2/sessions/active:
     get:
       tags: [Sessions]
       summary: Listado de sesiones activas por sujeto
       security: [ { dpop: [] } ]
-      parameters: [ { $ref: '#/components/parameters/TenantId' } ]
       responses:
         '200':
           description: Sesiones
@@ -431,6 +454,7 @@ paths:
       responses:
         '204': { description: Propagado }
 
+  # --- WebAuthn ---
   /webauthn/attestation/options:
     post:
       tags: [WebAuthn]
@@ -477,12 +501,12 @@ paths:
       responses:
         '200': { description: Autenticado }
 
+  # --- Contextual Tokens (QR) ---
   /identity/v2/contextual-tokens:
     post:
       tags: [Contextual Tokens (QR)]
       summary: Emitir token contextual firmado (COSE/JWS) — **Único emisor: identity-service**
       security: [ { dpop: [] } ]
-      parameters: [ { $ref: '#/components/parameters/TenantId' } ]
       requestBody:
         required: true
         content:
@@ -517,8 +541,23 @@ paths:
                 properties:
                   valid: { type: boolean }
                   jti_used: { type: boolean }
-        '400': { description: Inválido o expirado }
+                  claims:
+                    type: object
+                    properties:
+                      aud: { type: string }
+                      sub: { type: string }
+                      event_id: { type: string }
+                      location: { type: string }
+                      exp: { type: integer }
+        '400':
+          description: Inválido o expirado
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+              examples:
+                invalid_audience: { $ref: '#/components/schemas/Problem/examples/invalid_audience' }
 
+  # --- Compliance / DSAR ---
   /privacy/export:
     post:
       tags: [Compliance/DSAR]
@@ -543,10 +582,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DSARJob' }
 
+  # --- Admin (operaciones controladas) ---
   /admin/keys/rollover:
     post:
       tags: [Admin]
-      summary: Iniciar rollover de claves de firma (uso interno controlado)
+      summary: Iniciar rollover de claves de firma
       security: [ { mtls: [] } ]
       responses:
         '202': { description: Iniciado }
