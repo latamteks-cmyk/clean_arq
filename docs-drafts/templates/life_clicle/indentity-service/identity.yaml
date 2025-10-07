@@ -1,0 +1,568 @@
+openapi: 3.1.0
+info:
+  title: SmartEdify Identity Service API
+  version: "4.3"
+  summary: OIDC/OAuth2.1 + WebAuthn + DPoP + PBAC, multi-tenant/multi-región
+  contact: { name: SmartEdify Platform Team }
+servers:
+  - url: https://auth.smartedify.global
+    description: Producción
+  - url: https://staging.auth.smartedify.global
+    description: Staging
+tags:
+  - name: Discovery
+  - name: OAuth2/OIDC
+  - name: Sessions
+  - name: WebAuthn
+  - name: Contextual Tokens (QR)
+  - name: Compliance/DSAR
+  - name: Admin
+externalDocs:
+  description: OIDC metadata
+  url: https://openid.net/specs/openid-connect-discovery-1_0.html
+
+components:
+  securitySchemes:
+    oauth2:
+      type: oauth2
+      description: Authorization Code + PKCE only. Implicit/Hybrid disabled.
+      flows:
+        authorizationCode:
+          authorizationUrl: https://auth.smartedify.global/authorize
+          tokenUrl: https://auth.smartedify.global/oauth/token
+          scopes:
+            openid: OpenID scope
+            profile: Perfil básico
+            email: Email
+            offline_access: Refresh Tokens (rotating)
+    dpop:
+      type: http
+      scheme: bearer
+      description: JWT Access Token con header DPoP (RFC 9449). Access TTL ≤10m.
+    mtls:
+      type: mutualTLS
+      description: Autenticación de cliente para introspection/revoke (opaco) y M2M.
+    private_key_jwt:
+      type: openIdConnect
+      openIdConnectUrl: https://auth.smartedify.global/.well-known/openid-configuration
+  parameters:
+    TenantId:
+      name: tenant_id
+      in: query
+      required: true
+      schema: { type: string, format: uuid }
+      description: Identificador del tenant
+  headers:
+    DPoP:
+      description: Prueba de posesión (RFC 9449). Se requiere en endpoints protegidos.
+      schema: { type: string }
+  schemas:
+    Problem:
+      type: object
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        traceId: { type: string }
+    Jwks:
+      type: object
+      properties:
+        keys:
+          type: array
+          items:
+            type: object
+            properties:
+              kty: { type: string }
+              kid: { type: string }
+              use: { type: string }
+              alg: { type: string }
+              crv: { type: string }
+              x: { type: string }
+              y: { type: string }
+              n: { type: string }
+              e: { type: string }
+    TokenResponse:
+      type: object
+      properties:
+        access_token: { type: string }
+        token_type: { type: string, enum: [Bearer] }
+        expires_in: { type: integer }
+        refresh_token: { type: string }
+        scope: { type: string }
+        id_token: { type: string }
+    IntrospectionResponse:
+      type: object
+      properties:
+        active: { type: boolean }
+        scope: { type: string }
+        client_id: { type: string }
+        username: { type: string }
+        token_type: { type: string }
+        exp: { type: integer }
+        iat: { type: integer }
+        nbf: { type: integer }
+        sub: { type: string }
+        aud: { type: [string, array], items: { type: string } }
+        iss: { type: string }
+        jti: { type: string }
+        cnf:
+          type: object
+          properties:
+            jkt: { type: string, description: JWK thumbprint (DPoP) }
+    Session:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        device_id: { type: string }
+        cnf_jkt: { type: string }
+        issued_at: { type: string, format: date-time }
+        not_after: { type: string, format: date-time }
+        version: { type: integer }
+    WebAuthnOptions:
+      type: object
+      properties:
+        challenge: { type: string }
+        rpId: { type: string }
+        user:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+            displayName: { type: string }
+        timeout: { type: integer }
+        pubKeyCredParams:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { type: string }
+              alg: { type: integer }
+    WebAuthnResult:
+      type: object
+      properties:
+        id: { type: string }
+        rawId: { type: string }
+        type: { type: string }
+        response:
+          type: object
+          additionalProperties: true
+        clientExtensionResults:
+          type: object
+          additionalProperties: true
+    ContextualTokenRequest:
+      type: object
+      required: [aud, event_id, location, ttl_seconds]
+      properties:
+        aud: { type: string, description: Servicio destino (governance/physical-security) }
+        event_id: { type: string }
+        location: { type: string }
+        ttl_seconds: { type: integer, maximum: 600 }
+        cnf:
+          type: object
+          properties:
+            jkt: { type: string }
+    ContextualToken:
+      type: object
+      properties:
+        token: { type: string, description: COSE/JWS firmado ES256/EdDSA, con kid }
+        jti: { type: string }
+        exp: { type: integer }
+        iss: { type: string }
+        aud: { type: string }
+    DSARJob:
+      type: object
+      properties:
+        job_id: { type: string, format: uuid }
+        status: { type: string, enum: [accepted, processing, completed, failed] }
+        created_at: { type: string, format: date-time }
+
+paths:
+  /.well-known/openid-configuration:
+    get:
+      tags: [Discovery]
+      summary: OIDC Discovery por tenant
+      parameters: [ { $ref: '#/components/parameters/TenantId' } ]
+      responses:
+        '200':
+          description: Metadata OIDC
+          content:
+            application/json: { schema: { type: object } }
+        default: { description: Error, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /.well-known/jwks.json:
+    get:
+      tags: [Discovery]
+      summary: JWKS por tenant (exposición de claves públicas activas)
+      parameters: [ { $ref: '#/components/parameters/TenantId' } ]
+      responses:
+        '200':
+          description: JWKS
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Jwks' }
+
+  /authorize:
+    get:
+      tags: [OAuth2/OIDC]
+      summary: Authorization Code + PKCE (user-agent)
+      parameters:
+        - in: query
+          name: response_type
+          schema: { type: string, enum: [code] }
+          required: true
+        - in: query
+          name: client_id
+          required: true
+          schema: { type: string }
+        - in: query
+          name: redirect_uri
+          required: true
+          schema: { type: string, format: uri }
+        - in: query
+          name: scope
+          schema: { type: string }
+        - in: query
+          name: state
+          schema: { type: string }
+        - in: query
+          name: code_challenge
+          required: true
+          schema: { type: string }
+        - in: query
+          name: code_challenge_method
+          required: true
+          schema: { type: string, enum: [S256] }
+        - { $ref: '#/components/parameters/TenantId' }
+      responses:
+        '302': { description: Redirección con code }
+        default: { description: Error, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+
+  /oauth/par:
+    post:
+      tags: [OAuth2/OIDC]
+      summary: Pushed Authorization Requests (PAR)
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '201':
+          description: URN de solicitud
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  request_uri: { type: string }
+                  expires_in: { type: integer }
+
+  /oauth/token:
+    post:
+      tags: [OAuth2/OIDC]
+      summary: Intercambio code→token y refresh rotation (DPoP requerido)
+      security: [ { dpop: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                grant_type: { type: string, enum: [authorization_code, refresh_token, client_credentials, urn:ietf:params:oauth:grant-type:device_code] }
+                code: { type: string }
+                code_verifier: { type: string }
+                redirect_uri: { type: string, format: uri }
+                refresh_token: { type: string }
+                client_id: { type: string }
+      responses:
+        '200':
+          description: Tokens emitidos
+          headers:
+            DPoP-Nonce: { description: Nonce recomendado para siguiente intercambio, schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        default: { description: Error, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+
+  /oauth/introspect:
+    post:
+      tags: [OAuth2/OIDC]
+      summary: Introspección de tokens opacos (requiere mTLS o private_key_jwt)
+      security: [ { mtls: [] }, { private_key_jwt: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                token: { type: string }
+                token_type_hint: { type: string }
+      responses:
+        '200':
+          description: Estado del token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IntrospectionResponse' }
+
+  /oauth/revoke:
+    post:
+      tags: [OAuth2/OIDC]
+      summary: Revocar refresh/access
+      security: [ { mtls: [] }, { private_key_jwt: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                token: { type: string }
+                token_type_hint: { type: string }
+      responses:
+        '200': { description: OK }
+
+  /oauth/device_authorization:
+    post:
+      tags: [OAuth2/OIDC]
+      summary: Device Authorization Grant (para dispositivos limitados)
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                client_id: { type: string }
+                scope: { type: string }
+      responses:
+        '200':
+          description: Códigos de dispositivo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  device_code: { type: string }
+                  user_code: { type: string }
+                  verification_uri: { type: string }
+                  verification_uri_complete: { type: string }
+                  expires_in: { type: integer }
+                  interval: { type: integer }
+
+  /logout:
+    post:
+      tags: [OAuth2/OIDC]
+      summary: Logout del usuario (front-channel)
+      security: [ { dpop: [] } ]
+      responses:
+        '204': { description: Cerrada la sesión actual }
+
+  /backchannel-logout:
+    post:
+      tags: [OAuth2/OIDC]
+      summary: Backchannel Logout (OIDC)
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { type: object, properties: { logout_token: { type: string } } }
+      responses:
+        '200': { description: OK }
+
+  /identity/v2/token/refresh:
+    post:
+      tags: [Sessions]
+      summary: Refresh rotation con reuse detection (DPoP obligatorio)
+      security: [ { dpop: [] } ]
+      responses:
+        '200':
+          description: Nuevo par de tokens
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '401': { description: Reuse detectado, familia revocada }
+
+  /identity/v2/sessions/active:
+    get:
+      tags: [Sessions]
+      summary: Listado de sesiones activas por sujeto
+      security: [ { dpop: [] } ]
+      parameters: [ { $ref: '#/components/parameters/TenantId' } ]
+      responses:
+        '200':
+          description: Sesiones
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Session' }
+
+  /identity/v2/sessions/{id}/revoke:
+    post:
+      tags: [Sessions]
+      summary: Revocar una sesión específica
+      security: [ { dpop: [] } ]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Revocada }
+
+  /identity/v2/subject/revoke:
+    post:
+      tags: [Sessions]
+      summary: Revocación global por sujeto (establece not_before)
+      security: [ { dpop: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sub: { type: string }
+                not_before: { type: string, format: date-time }
+      responses:
+        '204': { description: Propagado }
+
+  /webauthn/attestation/options:
+    post:
+      tags: [WebAuthn]
+      summary: Solicitar opciones de registro (attestation)
+      security: [ { dpop: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { type: object, additionalProperties: true } }
+      responses:
+        '200': { description: Opciones, content: { application/json: { schema: { $ref: '#/components/schemas/WebAuthnOptions' } } } }
+
+  /webauthn/attestation/result:
+    post:
+      tags: [WebAuthn]
+      summary: Enviar resultado de registro (attestation)
+      security: [ { dpop: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/WebAuthnResult' } }
+      responses:
+        '201': { description: Credencial registrada }
+
+  /webauthn/assertion/options:
+    post:
+      tags: [WebAuthn]
+      summary: Solicitar opciones de autenticación (assertion)
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { type: object, additionalProperties: true } }
+      responses:
+        '200': { description: Opciones, content: { application/json: { schema: { $ref: '#/components/schemas/WebAuthnOptions' } } } }
+
+  /webauthn/assertion/result:
+    post:
+      tags: [WebAuthn]
+      summary: Enviar resultado de autenticación (assertion)
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/WebAuthnResult' } }
+      responses:
+        '200': { description: Autenticado }
+
+  /identity/v2/contextual-tokens:
+    post:
+      tags: [Contextual Tokens (QR)]
+      summary: Emitir token contextual firmado (COSE/JWS) — **Único emisor: identity-service**
+      security: [ { dpop: [] } ]
+      parameters: [ { $ref: '#/components/parameters/TenantId' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ContextualTokenRequest' }
+      responses:
+        '201':
+          description: Token emitido
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/ContextualToken' } }
+
+  /identity/v2/contextual-tokens/validate:
+    post:
+      tags: [Contextual Tokens (QR)]
+      summary: Validar token contextual (DPoP requerido; valida firma, aud, nbf/exp, cnf)
+      security: [ { dpop: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token: { type: string }
+      responses:
+        '200':
+          description: Válido
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid: { type: boolean }
+                  jti_used: { type: boolean }
+        '400': { description: Inválido o expirado }
+
+  /privacy/export:
+    post:
+      tags: [Compliance/DSAR]
+      summary: Solicitar exportación de datos (asíncrono)
+      security: [ { dpop: [] } ]
+      responses:
+        '202':
+          description: Aceptado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DSARJob' }
+
+  /privacy/data:
+    delete:
+      tags: [Compliance/DSAR]
+      summary: Solicitar eliminación de datos (asíncrono, idempotente)
+      security: [ { dpop: [] } ]
+      responses:
+        '202':
+          description: Aceptado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DSARJob' }
+
+  /admin/keys/rollover:
+    post:
+      tags: [Admin]
+      summary: Iniciar rollover de claves de firma (uso interno controlado)
+      security: [ { mtls: [] } ]
+      responses:
+        '202': { description: Iniciado }
+
+  /admin/keys/revoke:
+    post:
+      tags: [Admin]
+      summary: Revocar un kid específico y publicar JWKS
+      security: [ { mtls: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, properties: { kid: { type: string } } }
+      responses:
+        '202': { description: Revocación publicada }
+
+security:
+  - oauth2: [openid, profile]
