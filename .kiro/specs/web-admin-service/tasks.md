@@ -1,13 +1,13 @@
-# Implementation Plan - Web Service
+# Implementation Plan - Web Admin Service
 
 ## Overview
-This implementation plan converts the Web Service design into actionable coding tasks that build incrementally toward a production-ready React application. Each task focuses on specific functionality with clear integration points and validation criteria, following modern React patterns and security best practices.
+This implementation plan converts the Web Admin Service design into actionable coding tasks that build incrementally toward a production-ready React application for administrators (port 4000). Each task focuses on specific functionality with clear integration points and validation criteria, following modern React patterns and security best practices.
 
 ## Project Structure
-The Web Service follows the standardized frontend service structure defined in [Project Standards](../project-standards.md):
+The Web Admin Service follows the standardized frontend service structure defined in [Project Standards](../project-standards.md):
 
 ```
-web-service/
+web-admin-service/
 ├── src/
 │   ├── components/          # Reusable UI components
 │   │   ├── common/          # Common components (Button, Input, Modal)
