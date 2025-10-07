@@ -264,19 +264,19 @@ flowchart TB
 
 ---
 
-### **CU-07 Recuperación o Reemplazo de Claves de Firma (Evento Controlado)**
+### **CU-07 Recuperación o Reemplazo de Claves**
 
 **Actor:** Equipo de Seguridad / Infraestructura
 **Flujo:**
 
-1. **Detección o decisión de reemplazo**. Puede originarse por auditoría, compromiso detectado, fallo HSM/KMS o requerimiento normativo
-2. **Revocación de clave comprometida** Se marca kid afectado como revocado en JWKS y se actualiza el estado en el sistema de claves (KMS o HSM). y Se genera evento KeyRevoked en Kafka
-3. **Generación de nueva clave**. Creación controlada mediante HSM o KMS (ES256/EdDSA). y Registro del nuevo kid y publicación inmediata en JWKS.
-4. **Comunicación a consumidores**. 'identity-service' publica notificación 'KeyRolloverInitiated'. 'API Gateway', 'governance-service', 'physical-security-service' y otros validadores sincronizan JWKS.
-5. **Reemisión de tokens válidos**. Se fuerzan nuevas firmas con la clave nueva para sesiones activas críticas. y Tokens firmados con la clave revocada quedan inválidos desde 'not_before'.
-6. **Verificación post-cambio**. Validación cruzada en todos los validadores (ok para nueva clave, error para revocada). y Auditoría 'KeyChangeCompleted'.
+1. Detección o instrucción de reemplazo (auditoría, incidente o fallo).
+2. Revocación de 'kid' afectado y evento 'KeyRevoked' en Kafka.
+3. Generación controlada de nueva clave (HSM/KMS).
+4. Publicación de nueva clave en JWKS; notificación 'KeyRolloverInitiated'.
+5. Validadores sincronizan caché JWKS ≤5 min.
+6. Validación cruzada y auditoría 'KeyChangeCompleted'.
 
-**Resultado:** Cadena de confianza restablecida. No se pierde trazabilidad, y todos los validadores sincronizan la nueva clave en ≤5 minutos.
+**Resultado:** continuidad criptográfica restablecida sin interrupción del servicio.
 ---
 
 ## 🧩 6. Servicios Integrados y Responsabilidades
@@ -297,33 +297,61 @@ flowchart TB
 
 ## 🔐 7. SeguridadZero Trust Architecture: autenticación y autorización continua. y Cumplimiento
 
+| Mecanismo                                       | Descripción                                                                                                                         |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| **TLS 1.3 + mTLS**                              | Canal cifrado y autenticación mutua entre microservicios.                                                                           |
+| **Cifrado en reposo AES-256 (KMS regional)**    | Protección de datos y claves con segmentación por región.                                                                           |
+| **Aislamiento criptográfico por tenant/región** | Cada tenant o jurisdicción posee subclaves dedicadas gestionadas por el KMS jerárquico (master regional → subclave tenant → `kid`). |
+| **Rotación y Rollover**                         | Claves ES256/EdDSA rotadas automáticamente cada 90 días con rollover de 7 días. JWKS publicado por tenant con TTL ≤5 min.           |
+| **Revocación distribuida global**               | Eventos Kafka replicados entre regiones; Redis cache local para invalidación inmediata. Propagación objetivo ≤60 s P95.             |
+| **Token Sender-Constrained (DPoP)**             | Prevención de replay attacks; `cnf.jkt` enlaza token y dispositivo.                                                                 |
+| **Logs WORM con hash-chain**                    | Evidencias inmutables, selladas temporalmente y verificables.                                                                       |
+| **Políticas PBAC sincronizadas OPA bundles**    | Distribución de bundles firmados por CDN, TTL ≤5 min. Sin dependencias síncronas cross-region.                                      |
+| **Fallback TOTP endurecido**                    | Solo TOTP basado en app autenticadora certificada, vinculado al dispositivo y `cnf.jkt`. SMS y correo deshabilitados.               |
+| **Cumplimiento DSAR / GDPR / LGPD**             | Ejecución orquestada por tenant y validada en tiempo real por `compliance-service`.                                                 |
+| **Algoritmos asimétricos exclusivos**           | **ES256 / EdDSA obligatorios. HS256 prohibido.**                                                                                    |
 
-| Mecanismo                           | Descripción                                  |
-| ----------------------------------- | -------------------------------------------- |
-| **Cifrado TLS 1.3 + mTLS**          | Comunicación segura entre servicios.         |
-| **Cifrado en reposo AES-256**       | Protección de datos y claves KMS regionales. |
-| **Revocación Distribuida**          | Eventos Kafka + Redis para sesiones.         |
-| **Token Sender-Constrained (DPoP)** | Prevención de replay attacks.                |
-| **Logs WORM**                       | Evidencias inmutables con hash-chain.        |
-| **Cumplimiento DSAR / GDPR / LGPD** | Ejecución orquestada y validada por tenant.  |
-| **Algoritmos Asimétricos Exclusivos** | **ES256/EdDSA obligatorios, HS256 prohibido** |
+
+## ⚙️ 8. Operación Multi-Región
+---
+
+**Sincronización Criptográfica y de Políticas**
+**JWKS:** replicación asíncrona mediante Kafka o Pub/Sub y distribución vía CDN regional. Cada región mantiene su copia local (eventual consistency).
+**Revocación de Sesiones:** propagación por eventos RevocationEvent con cache local Redis; sin dependencias HTTP entre regiones.
+**Políticas OPA/Cedar:** bundles versionados en repositorio GitOps o CDN; TTL ≤5 min. Validación siempre local.
+**No se permiten llamadas síncronas cross-region** durante autenticación ni validación de tokens.
+
+**Modelo de Claves Jerárquico**
+**Nivel 1:** master key regional (jurisdicción legal).
+**Nivel 2:** subclave por tenant (kid único).
+**Nivel 3:** rotación y rollover automáticos según política de seguridad.
+
+**Endpoint JWKS por tenant:**
+'https://auth.smartedify.global/.well-known/jwks.json?tenant_id={tenant}'
+
+**Resiliencia Operativa**
+Arquitectura event-driven con consistencia eventual garantizada.
+Objetivo de continuidad: ninguna operación de autenticación depende de servicios externos de otra región.
+En caso de partición, validación local priorizada; sincronización diferida post-restauración.
+
+
+
+## 📈 9. Métricas y SLOs
+
+| Área              | Indicador                 | Umbral                  |
+| ----------------- | ------------------------- | ----------------------- |
+| Autenticación     | Tiempo medio de login     | ≤3 s                    |
+| Revocación Global | Propagación               | ≤60 s P95 / ≤5 min P100 |
+| Disponibilidad    | SLA anual                 | ≥99.95%                 |
+| DSAR              | Tiempo completitud        | ≤72 h                   |
+| Auditoría         | Integridad de logs        | 100% verificada         |
+| JWKS              | Latencia de actualización | ≤5 min                  |
+| OPA Bundles       | TTL de sincronización     | ≤5 min                  |
+
 
 ---
 
-## 📈 8. Métricas y SLOs
-
-| Área           | Métrica             | Umbral  | Frecuencia |
-| -------------- | ------------------- | ------- | ---------- |
-| Autenticación  | Latencia P95        | ≤3s     | Continuo   |
-| Revocación     | Propagación global  | ≤30s    | Realtime   |
-| Disponibilidad | SLA anual           | ≥99.95% | Mensual    |
-| DSAR           | Resolución completa | ≤72h    | Diario     |
-| Auditoría      | Eventos firmados    | 100%    | Continuo   |
-| JWKS Cache     | Sincronización      | ≤5min   | Continuo   |
-
----
-
-## 🗺️ 9. Roadmap Técnico
+## 🗺️ 10. Roadmap Técnico
 
 | Fase                                      | Objetivos Clave                                                                 |
 | ----------------------------------------- | ------------------------------------------------------------------------------- |
@@ -332,7 +360,7 @@ flowchart TB
 
 ---
 
-## 🧾 10. Gobierno del Producto
+## 🧾 11. Gobierno del Producto
 
 | Rol                | Responsabilidad                         |
 | ------------------ | --------------------------------------- |
@@ -345,7 +373,13 @@ flowchart TB
 
 ---
 
-## 🏁 11. Conclusión
+##📋 12. Consideraciones Finales
+
+Los cambios introducen resiliencia multirregional, aislamiento criptográfico por tenant/región y autenticación reforzada.
+Todos los mecanismos se ajustan a NIST 800-63-4, RFC 9449 (DPoP) y ISO 27001 Annex A.10.
+No se modifican contratos API ni casos de uso de negocio; se extiende la robustez operativa y el cumplimiento transnacional.
+
+## 🏁 13. Conclusión
 
 El **Identity Service** es el eje de confianza y control en la plataforma SmartEdify.
 Combina autenticación biométrica moderna, autorización contextual y cumplimiento regulatorio automatizado.
