@@ -28,16 +28,20 @@ Asegura que toda interacción digital sea **irrefutable, auditable y legalmente 
 
 ---
 
-## 👥 2. Usuarios y Personas
+## 2. Usuarios y Personas
 
-| Rol                                     | Tipo de Usuario    | Objetivo Principal                                                      | Interacción con Identity Service                                                          |
-| --------------------------------------- | ------------------ | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| **Residente / Propietario**             | Usuario final      | Acceder de forma segura y validar su identidad en asambleas y portales. | Autenticación WebAuthn o Passkey, emisión de QR de acceso, validación de consentimientos. |
-| **Administrador de Condominio**         | Usuario operativo  | Gestionar accesos, roles y quórum de asambleas.                         | Gestión de sesiones, firma digital de actas y uso de APIs OIDC.                           |
-| **Guardia / Personal de Seguridad**     | Usuario de campo   | Validar accesos físicos mediante QR o credenciales.                     | Validación de tokens contextuales (`/validate`).                                          |
-| **Legal y Compliance**                  | Usuario interno    | Auditar identidades, accesos y evidencias digitales.                    | Consultas seguras de logs, validación de políticas activas.                               |
-| **Servicios Internos (Microservicios)** | Sistemas           | Autenticarse entre sí para validar operaciones.                         | Autenticación mTLS y JWT con `kid` y `cnf`.                                               |
-| **DPO / Auditoría Externa**             | Usuario autorizado | Revisar cumplimiento y DSARs.                                           | Acceso controlado a evidencias anonimizadas.                                              |
+El identity-service autentica y emite credenciales para **todos los principios**. La asignación de **roles, grupos, relaciones y atributos** es responsabilidad de `user-profiles-service` y se proyecta en los tokens como claims para PBAC.
+
+| Clase (subject_type) | Subtipos/ejemplos | Auth preferente | Claims mínimos | Casos de uso típicos |
+|---|---|---|---|---|
+| human.end_user | Propietario, Residente, Trabajador, Prestador, Invitado | WebAuthn/Passkey; fallback TOTP | sub, tenant_id, role_ids, entitlements, assurance, cnf.jkt | Acceso a portales, asistencia/voto en asambleas, reservas |
+| human.operator | Administrador, Guardia, Auditor/DPO | WebAuthn + MFA reforzado | + group_ids, org_unit | Gestión de quórum, revocación, auditoría |
+| service.principal | Microservicios internos | mTLS + private_key_jwt + DPoP | sub=client_id, aud, scp | Llamadas entre servicios, validación de tokens |
+| external.app | Integraciones de terceros | private_key_jwt + PKCE | aud, scp, jwk thumbprint | Integraciones partner controladas |
+| device | Dispositivo atado | DPoP obligatorio | cnf.jkt, device_id | Validación de QR/PoP, kioscos/torniquetes |
+
+**Nota:** los **roles y permisos** no se definen en identity-service. Se consultan en `user-profiles-service` y se incluyen como `role_ids/entitlements` en los tokens. El PDP (OPA/Cedar) evalúa acceso con RBAC+ABAC+ReBAC.
+
 
 ---
 
