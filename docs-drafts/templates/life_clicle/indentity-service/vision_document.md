@@ -168,7 +168,7 @@ flowchart TB
 | **Autenticación**         | **WebAuthn / Passkeys**                      | Autenticación biométrica sin almacenar datos sensibles.                                                                                                                  |
 |                           | **TOTP / Fallback MFA**                      | Alternativa AAL2 para dispositivos no compatibles.                                                                                                                       |
 | **Autorización**          | **PBAC (RBAC+ABAC+ReBAC)**                   | Motor OPA/Cedar, evaluación contextual y fail-closed.                                                                                                                    |
-| **Sesiones**              | **Gestión distribuida y revocación global**  | Logout inmediato, DPoP obligatorio, TTL ≤10 min.                                                                                                                         |
+| **Sesiones**              | **Gestión distribuida y revocación global**  | Logout inmediato, DPoP obligatorio, TTL ≤5 min.                                                                                                                         |
 | **QR Contextuales**       | **Tokens firmados (COSE/JWS)**               | Usados para asambleas, accesos físicos o eventos transitorios.                                                                                                           |
 | **Cumplimiento y DSAR**   | **Portabilidad / Eliminación Cross-Service** | Coordinado por `compliance-service` en tiempo de ejecución.                                                                                                              |
 | **Auditoría y Evidencia** | **Eventos WORM en Kafka**                    | Audit trail legal e inmutable.                                                                                                                                           |
@@ -184,7 +184,7 @@ flowchart TB
 **Flujo:**
 
 1. El Administrador crea usuarios (individual o masivo) desde su dashboard → user-profiles-service.
-2. identity-service genera enlace de invitación seguro (firmado, TTL corto, un solo uso).
+2. identity-service genera enlace de invitación seguro (firmado, TTL ≤5min, un solo uso).
 3. El usuario recibe correo enviado a traves de 'communication-service', verifica identidad y acepta consentimientos.
 4. Configura su método de acceso (Passkey o TOTP).
 5. identity-service marca la identidad como ACTIVA y notifica a user-profiles
@@ -226,8 +226,8 @@ flowchart TB
 **Actor:** Governance Service / Residente
 **Flujo:**
 
-1. Governance solicita QR firmado al identity-service.
-2. Identity emite el token COSE/JWS firmado (ES256) con kid y iss canónico por tenant, TTL=300 s. Único emisor: ningún otro servicio puede firmar tokens contextuales.
+1. Governance solicita y consume QR firmado al identity-service.
+2. Identity emite el token COSE/JWS firmado (ES256) con kid y iss canónico por tenant, TTL=300 s. Único emisor y validador: ningún otro servicio puede firmar tokens contextuales (endpoint/validate)
 3. Streaming-service muestra QR para escaneo.
 4. El servicio validador 'governance' ejecuta /validate con DPoP y verifica firma, aud, exp, cnf.
 5. Evento `AccessValidated` registrado en Kafka.
@@ -244,7 +244,7 @@ flowchart TB
 1. Solicitud `POST /identity/v2/sessions/{id}/revoke`.
 2. Identity marca `not-before` para el `sub`.
 3. Se publica evento `RevokeSession`.
-4. Todos los servicios invalidan tokens en P95 ≤30s.
+4. Todos los servicios invalidan tokens en P95 ≤60s.
 
 **Resultado:** Cierre de sesión universal, trazado en auditoría.
 
