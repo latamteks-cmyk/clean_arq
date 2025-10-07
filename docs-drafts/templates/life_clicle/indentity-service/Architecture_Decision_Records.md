@@ -25,20 +25,31 @@ Adoptar **OpenID Connect (OIDC) + OAuth 2.1** como marco principal de autenticac
 
 **Fecha:** Octubre 2025
 **Estado:** Aprobado
+**Actualizado:** Implementación de recuperación segura de Passkeys
 
 ### Contexto
 
-Se busca eliminar contraseñas, aumentar seguridad y cumplir NIST AAL2/AAL3.
+Se busca eliminar contraseñas y mantener un método de autenticación fuerte, con capacidad de recuperación ante pérdida de dispositivo o clave biométrica.
 
 ### Decisión
 
-Usar **WebAuthn L3 / Passkeys** como método primario de autenticación para todos los usuarios humanos.
+Usar **WebAuthn/Passkeys** como método primario de autenticación (AAL2/AAL3), con un **mecanismo de recuperación seguro y auditado**.
+
+### Estrategia de recuperación de Passkey
+
+1. **Inicio de proceso controlado**: El usuario solicita recuperación desde el dashboard o vía link firmado (TTL ≤10 min).
+2. **Verificación reforzada (Step-Up)**:
+
+   * Validación de identidad vía documento digital + OTP + validación del `device_id` previo.
+   * Autorización del `administrator` o `compliance-service` (según política de tenant).
+3. **Registro de nueva Passkey**: Se invalida la anterior (`not_before`) y se registra una nueva credencial WebAuthn asociada.
+4. **Auditoría WORM**: Cada evento de recuperación se registra con `evidence_ref` y `ip_address` para trazabilidad.
 
 ### Consecuencias
 
-* Mejora UX y seguridad frente a phishing.
-* Eliminación de contraseñas almacenadas.
-* Fallback limitado a TOTP con aplicación autenticadora (no SMS).
+* Cumplimiento con NIST 800-63-4 (AAL2/AAL3).
+* Reducción de fraude por recuperación no autorizada.
+* Proceso trazable y controlado sin requerir contraseñas.
 
 ---
 
@@ -71,21 +82,34 @@ Implementar un **KMS jerárquico**:
 
 **Fecha:** Octubre 2025
 **Estado:** Aprobado
+**Actualizado:** Mecanismo de firma y validación de bundles
 
 ### Contexto
 
-La autorización requiere combinar RBAC, ABAC y ReBAC en políticas auditables y centralizadas.
+Las políticas PBAC deben distribuirse entre regiones garantizando autenticidad e integridad.
 
 ### Decisión
 
-Adoptar **OPA/Cedar** como Policy Decision Point (PDP) distribuido.
-Las políticas se distribuyen mediante **bundles firmados y replicados por CDN** (TTL ≤ 5 min).
+Usar **OPA/Cedar** como Policy Decision Point, con distribución de bundles firmados digitalmente.
+
+### Mecanismo de firma
+
+* Los bundles se empaquetan y firman con **Ed25519** o **ES256**, utilizando el mismo KMS jerárquico del identity-service.
+* El manifiesto del bundle (`manifest.json`) contiene:
+
+  * `bundle_version`
+  * `hash_sha256`
+  * `signature`
+  * `kid`
+* Los validadores OPA verifican la firma antes de aplicar cambios de política.
+* Rechazo automático (`fail-closed`) ante firma inválida o bundle corrupto.
 
 ### Consecuencias
 
-* Evaluación local sin latencia cross-region.
-* Auditoría y versionado de políticas.
-* Fail-closed en caso de error de comunicación.
+* Políticas verificables y auditables.
+* Distribución segura vía CDN o GitOps.
+* Integridad garantizada en despliegues automatizados.
+
 
 ---
 
@@ -93,21 +117,22 @@ Las políticas se distribuyen mediante **bundles firmados y replicados por CDN**
 
 **Fecha:** Octubre 2025
 **Estado:** Aprobado
+**Actualizado:** Validación de soporte EdDSA en servicios consumidores
 
 ### Contexto
 
-Se busca prevenir vulnerabilidades derivadas de algoritmos simétricos (HS256).
+Los validadores (API Gateway, Governance, Physical Security) deben poder verificar tokens firmados con ES256 y EdDSA.
 
 ### Decisión
 
-Solo se permiten **ES256 o EdDSA** para firmar tokens JWT/COSE.
-`HS256` queda **prohibido** en ejemplos, código o documentación.
+* Establecer **validación multi-algoritmo (ES256 y EdDSA)** en todos los componentes consumidores.
+* Añadir prueba automática de validación EdDSA en los pipelines CI/CD de cada servicio dependiente.
 
 ### Consecuencias
 
-* Mayor seguridad y no repudio.
-* Compatibilidad con hardware HSM/FIPS.
-* Requiere soporte de validadores multi-algoritmo.
+* Prevención de incompatibilidades durante rotación de algoritmos.
+* Mayor flexibilidad criptográfica en tenants con hardware FIPS.
+* Garantía de interoperabilidad verificada en cada despliegue.
 
 ---
 
@@ -228,26 +253,33 @@ Orquestar las solicitudes DSAR desde `identity-service` con ejecución distribui
 
 **Fecha:** Octubre 2025
 **Estado:** Aprobado
+**Actualizado:** Inclusión de métrica de error de validación de tokens
 
 ### Contexto
 
-Se requiere validar SLOs críticos (revocación, login, DSAR, disponibilidad).
+Además de latencia y disponibilidad, se requiere visibilidad sobre fallas de autenticación y errores de firma.
 
 ### Decisión
 
-Integrar observabilidad con **Prometheus + Grafana + OpenTelemetry**.
-SLOs definidos:
+Incluir nueva métrica en el sistema de observabilidad (`Prometheus + Grafana`):
 
-* Revocación ≤60 s P95
-* Login ≤3 s P95
-* Disponibilidad ≥99.95%
-* DSAR ≤72 h
+* **`token_validation_error_rate`** = (número de errores de validación / total de tokens validados) × 100
+
+### Métricas completas
+
+| Indicador                     | Descripción                            | Umbral   |
+| ----------------------------- | -------------------------------------- | -------- |
+| `login_latency_p95`           | Tiempo medio de autenticación          | ≤ 3 s    |
+| `revocation_latency_p95`      | Propagación global de revocación       | ≤ 60 s   |
+| `token_validation_error_rate` | Tasa de errores de validación JWT/COSE | ≤ 0.1%   |
+| `availability_uptime`         | SLA general                            | ≥ 99.95% |
+| `dsar_completion_time`        | Tiempo de ejecución DSAR               | ≤ 72 h   |
 
 ### Consecuencias
 
-* Trazabilidad total de desempeño.
-* Cumplimiento con auditorías de SLA/SOC2.
-* Alertas automatizadas.
+* Monitoreo más granular de fallos criptográficos.
+* Correlación directa con eventos de rotación o sincronización JWKS.
+* Facilita auditoría SOC2 y respuesta a incidentes.
 
 ---
 
@@ -287,5 +319,6 @@ La suma de decisiones garantiza:
 * Cumplimiento transnacional.
 * Resiliencia criptográfica global.
 * Escalabilidad multi-tenant sin pérdida de seguridad.
+
 
 
