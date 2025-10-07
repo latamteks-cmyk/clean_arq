@@ -57,58 +57,87 @@ El `identity-service` adopta un modelo **Zero Trust + Event-Driven + Policy-Base
 4. **Capa de Cumplimiento:** Integración con `compliance-service` para validaciones legales y DSAR runtime
 5. **Capa de Auditoría:** Kafka y almacenamiento WORM con hash-chain
 
-### **3.2. Diagrama de Arquitectura**
+### 3.2. Arquitectura definitiva (visión plataforma)
 
 ```mermaid
-graph TD
-  subgraph Clientes
-    U1[Residente Web/Móvil]
-    U2[Administrador Web]
-    U3[Guardia App]
+---
+config:
+  layout: elk
+---
+flowchart TB
+ subgraph Frontend Applications
+        WA["Web Admin<br>:4000"]
+        WU["Web User<br>:3000"]
+        MA["Mobile App<br>:8081"]
   end
-  
-  subgraph BFFLayer["BFF Layer"]
-    BFF_U[BFF User<br/>:3007]
-    BFF_A[BFF Admin<br/>:4001]
-    BFF_M[BFF Mobile<br/>:8082]
+ subgraph BFF Layer
+        BFF_A["BFF Admin<br>:4001"]
+        BFF_U["BFF User<br>:3007"]
+        BFF_M["BFF Mobile<br>:8082"]
   end
-  
-  subgraph Gateway
-    GW[API Gateway / PEP<br/>:8080]
+ subgraph API Gateway
+        GW["Gateway Service<br>:8080"]
   end
-  
-  subgraph Core
-    ID[Identity Service<br/>OIDC + WebAuthn + PBAC<br/>:3001]
-    POL[OPA/Cedar Policy Engine]
-    CMP[Compliance Service<br/>:3012]
-    K[Kafka / Audit Stream]
+ subgraph Core Services
+        IS["Identity Service<br>:3001"]
+        UPS["User Profiles Service<br>:3002"]
+        TS["Tenancy Service<br>:3003"]
+        NS["Notifications Service<br>:3005"]
+        DS["Documents Service<br>:3006"]
   end
-  
-  subgraph Servicios Dependientes
-    GOV[Governance Service]
-    STR[Streaming Service]
-    FIN[Finance Service]
-    PAY[Payroll Service]
+ subgraph Governance Services
+        GS["Governance Service<br>:3011"]
+        CS["Compliance Service<br>:3012"]
+        RS["Reservation Service<br>:3013"]
+        SS["Streaming Service<br>:3014"]
+  end
+ subgraph Operations Services
+        PSS["Physical Security Service<br>:3004"]
+        FS["Finance Service<br>:3007"]
+        PS["Payroll Service<br>:3008"]
+        HCS["HR Compliance Service<br>:3009"]
+        AMS["Asset Management Service<br>:3010"]
+  end
+ subgraph Business Services
+        MS["Marketplace Service<br>:3015"]
+        AS["Analytics Service<br>:3016"]
+  end
+ subgraph Observability
+        PROM["Prometheus<br>:9090"]
+        GRAF["Grafana<br>:3000"]
+        OTEL["OTel Collector<br>:4317"]
+  end
+ subgraph Messaging
+        KAFKA["Apache Kafka<br>:9092"]
+        REDIS["Redis<br>:6379"]
+  end
+ subgraph Storage
+        PG[("PostgreSQL<br>:5432")]
+        S3[("S3 Storage")]
   end
 
-  U1-->BFF_U
-  U2-->BFF_A
-  U3-->BFF_M
-  
-  BFF_U-->GW
-  BFF_A-->GW
-  BFF_M-->GW
-  
-  GW-->ID
-  ID-->POL
-  ID-->CMP
-  ID-->K
-  ID-->GOV
-  ID-->STR
-  ID-->FIN
-  ID-->PAY
-  
-  STR-.->|Muestra QR emitido por Identity|ID
+    WA --> BFF_A
+    WU --> BFF_U
+    MA --> BFF_M
+    BFF_A --> GW
+    BFF_U --> GW
+    BFF_M --> GW
+
+    GW --> IS & UPS & TS & NS & DS & GS & CS & RS & SS & PSS & FS & PS & HCS & AMS & MS & AS & REDIS
+
+    IS -. audit/events .-> KAFKA
+    IS -. telemetry .-> OTEL
+    GS -. audit/events .-> KAFKA
+    SS -. audit/events .-> KAFKA
+    FS -. events .-> KAFKA
+
+    IS --> PG & REDIS
+    UPS --> PG
+    TS --> PG
+    GS --> PG
+    DS --> S3
+    SS --> S3
+    GW -. metrics .-> PROM
 ```
 
 ### **3.3. Tecnologías y Protocolos**
