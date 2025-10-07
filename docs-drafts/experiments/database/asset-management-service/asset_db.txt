@@ -1,0 +1,34 @@
+
+incident
+
+id_incidente → 5c8b8b3e-9b7f-4c9c-90d2-2e3e8d2d7c11
+
+tenant_id → a1c2d3e4-5f67-489a-91bc-0def12345678
+
+descripcion → Charco en pasillo. Se percibe goteo desde techo.
+
+id_user → 9d3a5f22-8c4b-4c0a-b7f6-1a2b3c4d5e6f
+
+fecha → 2025-10-04T10:12:27-05:00
+
+lat → -12.095421
+
+lon → -77.032781
+
+loc_accuracy_m → 8.5
+
+loc_source → gps
+
+device_info → {"os":"Android","os_ver":"14","app":"1.7.0"}
+
+incident_media
+
+id_media → 7b6f0a1c-2d34-4f5b-8a90-1c2d3e4f5a6b
+
+tenant_id → a1c2d3e4-5f67-489a-91bc-0def12345678
+
+id_incidente → 5c8b8b3e-9b7f-4c9c-90d2-2e3e8d2d7c11
+
+storage_uri → s3://assets/incidents/5c8b8b3e-9b7f-4c9c-90d2-2e3e8d2d7c11/IMG_001.jpg
+
+fecha → 2025-10-04T10:13:02-05:00

@@ -1,8 +1,8 @@
-# 📋 Requirements Document – Web Service
+# 📋 Requirements Document – Web Admin Service
 
 ## Introduction
 
-This document establishes the auditable requirements for the **Web Service** (Frontend Application), defining the minimum technical, business, and integration criteria to be validated. The web service provides the user interface for the SmartEdify platform, focusing on authentication flows, dashboard functionality, and comprehensive testing interfaces for the tenancy, user-profile, and identity services.
+This document establishes the auditable requirements for the **Web Admin Service** (Frontend Application - Port 4000), defining the minimum technical, business, and integration criteria to be validated. The web admin service provides the administrative interface for the SmartEdify platform, focusing on authentication flows, admin dashboard functionality, and comprehensive testing interfaces for the tenancy, user-profile, and identity services.
 
 ---
 

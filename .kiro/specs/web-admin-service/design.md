@@ -1,8 +1,8 @@
-# 🏗️ Design Document – Web Service
+# 🏗️ Design Document – Web Admin Service
 
 ## Overview
 
-The Web Service is a modern React-based frontend application that provides the user interface for the SmartEdify platform. It implements secure authentication flows, comprehensive service testing interfaces, and a responsive dashboard system. The application is designed to work seamlessly with the Gateway Service, implementing JWT/DPoP authentication, multi-tenant context management, and comprehensive observability.
+The Web Admin Service is a modern React-based frontend application that provides the administrative interface for the SmartEdify platform (port 4000). It implements secure authentication flows, comprehensive service testing interfaces, and a responsive dashboard system. The application is designed to work seamlessly with the Gateway Service, implementing JWT/DPoP authentication, multi-tenant context management, and comprehensive observability.
 
 ### Key Design Principles
 
