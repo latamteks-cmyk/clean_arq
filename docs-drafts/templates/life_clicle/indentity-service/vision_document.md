@@ -1,4 +1,4 @@
-# 📘 Documento de Visión Técnico–Funcional
+# 📘 Documento de Visión
 
 ## **Identity Service — SmartEdify Platform**
 
@@ -47,10 +47,11 @@ Asegura que toda interacción digital sea **irrefutable, auditable y legalmente 
 
 El `identity-service` adopta un modelo **Zero Trust + Event-Driven + Policy-Based Access**, estructurado en cuatro capas:
 
-1. **Capa de Exposición:** API Gateway (8080) con PEP (Policy Enforcement Point).
-2. **Capa de Identidad:** Núcleo OIDC/OAuth2 + WebAuthn + DPoP.
-3. **Capa de Cumplimiento:** Integración con `compliance-service` para validaciones legales y DSAR runtime.
-4. **Capa de Auditoría:** Kafka y almacenamiento WORM con hash-chain.
+1. **Capa de Presentación:** BFF Layer especializado por cliente
+2. **Capa de Exposición:** API Gateway (8080) con PEP (Policy Enforcement Point)
+3. **Capa de Identidad:** Núcleo OIDC/OAuth2 + WebAuthn + DPoP
+4. **Capa de Cumplimiento:** Integración con `compliance-service` para validaciones legales y DSAR runtime
+5. **Capa de Auditoría:** Kafka y almacenamiento WORM con hash-chain
 
 ### **3.2. Diagrama de Arquitectura**
 
@@ -61,43 +62,57 @@ graph TD
     U2[Administrador Web]
     U3[Guardia App]
   end
-  subgraph Gateway
-    GW[API Gateway / PEP]
+  
+  subgraph BFFLayer["BFF Layer"]
+    BFF_U[BFF User<br/>:3007]
+    BFF_A[BFF Admin<br/>:4001]
+    BFF_M[BFF Mobile<br/>:8082]
   end
+  
+  subgraph Gateway
+    GW[API Gateway / PEP<br/>:8080]
+  end
+  
   subgraph Core
-    ID[Identity Service<br/>OIDC + WebAuthn + PBAC]
+    ID[Identity Service<br/>OIDC + WebAuthn + PBAC<br/>:3001]
     POL[OPA/Cedar Policy Engine]
-    CMP[Compliance Service]
+    CMP[Compliance Service<br/>:3012]
     K[Kafka / Audit Stream]
   end
+  
   subgraph Servicios Dependientes
-    GOV[Governance]
-    FIN[Finance]
-    PAY[Payroll]
-    HR[Human Resources]
-    AM[Asset Management]
+    GOV[Governance Service]
+    STR[Streaming Service]
+    FIN[Finance Service]
+    PAY[Payroll Service]
   end
 
-  U1-->GW
-  U2-->GW
-  U3-->GW
+  U1-->BFF_U
+  U2-->BFF_A
+  U3-->BFF_M
+  
+  BFF_U-->GW
+  BFF_A-->GW
+  BFF_M-->GW
+  
   GW-->ID
   ID-->POL
   ID-->CMP
   ID-->K
   ID-->GOV
+  ID-->STR
   ID-->FIN
   ID-->PAY
-  ID-->HR
-  ID-->AM
+  
+  STR-.->|Muestra QR emitido por Identity|ID
 ```
 
 ### **3.3. Tecnologías y Protocolos**
 
-* **OIDC / OAuth 2.1 / PKCE obligatorio**
+* **OIDC / OAuth 2.1 / PKCE obligatorio** - Flujos implícito e híbrido PROHIBIDOS
 * **WebAuthn L3 / Passkeys (AAL2/AAL3)**
 * **DPoP (RFC 9449)** para tokens sender-constrained
-* **JWT ES256 con rotación 90d + rollover 7d**
+* **JWT ES256/EdDSA con rotación 90d + rollover 7d** - HS256 EXPLÍCITAMENTE PROHIBIDO
 * **OPA/Cedar** para políticas contextuales híbridas
 * **Kafka** para trazabilidad y cumplimiento
 * **PostgreSQL** con RLS y cifrado en reposo
@@ -118,7 +133,7 @@ graph TD
 |                          | OPA/Cedar PDP              | Evaluación de acceso en tiempo real.                              |
 | **Sesiones**             | Gestión distribuida        | Logout global, DPoP, control por dispositivo.                     |
 |                          | Revocación instantánea     | Propagación ≤30s vía Kafka.                                       |
-| **QR Contextuales**      | Tokens firmados            | COSE/JWS con TTL corto para asambleas o accesos físicos.          |
+| **QR Contextuales**      | **ÚNICO EMISOR Y VALIDADOR** | COSE/JWS con TTL corto para asambleas o accesos físicos.          |
 | **Cumplimiento (DSAR)**  | Portabilidad y eliminación | Cross-service con orquestación del compliance-service.            |
 | **Auditoría Legal**      | Logs WORM                  | Registro inmutable y firmado digitalmente.                        |
 
@@ -147,7 +162,7 @@ graph TD
 
 1. Usuario inicia autenticación WebAuthn.
 2. Se valida `credentialId` y `publicKey`.
-3. Se genera JWT + DPoP (ES256).
+3. Se genera JWT + DPoP (ES256/EdDSA).
 4. Se publica evento `AuthSuccess` en Kafka.
 
 **Resultado:** Sesión autenticada, válida para 10 minutos y atada al dispositivo.
@@ -173,9 +188,10 @@ graph TD
 **Flujo:**
 
 1. Governance solicita QR firmado al identity-service.
-2. Identity genera COSE/JWS (`kid`, `ttl=300s`).
-3. Guardia valida QR con `/validate` + DPoP.
-4. Evento `AccessValidated` registrado en Kafka.
+2. **Identity genera COSE/JWS (`kid`, `ttl=300s`) - ÚNICO EMISOR**.
+3. Streaming-service muestra QR para escaneo.
+4. Guardia valida QR con `/validate` + DPoP.
+5. Evento `AccessValidated` registrado en Kafka.
 
 **Resultado:** Acceso físico o digital validado con respaldo legal y técnico.
 
@@ -202,7 +218,7 @@ graph TD
 
 1. Usuario solicita `DELETE /privacy/data`.
 2. Identity crea `job_id` y publica `DataDeletionRequested`.
-3. Compliance coordina con governance, hr y finance.
+3. **Compliance-service orquesta crypto-erase en governance-service y otros**.
 4. Todos los servicios confirman eliminación y firman estado.
 
 **Resultado:** Eliminación completa del usuario con registro de cumplimiento.
@@ -214,11 +230,12 @@ graph TD
 **Actor:** Infraestructura / Seguridad
 **Flujo:**
 
-1. Cada 90 días se rota la clave ES256.
+1. Cada 90 días se rota la clave ES256/EdDSA.
 2. JWKS publica nuevas y antiguas claves (rollover 7d).
-3. Los servicios validadores sincronizan caché ≤5min.
+3. **Gateway-service sincroniza caché ≤5min (REQUISITO P0)**.
+4. Validación continua sin interrupciones.
 
-**Resultado:** Validación continua sin interrupciones durante transición.
+**Resultado:** Seguridad criptográfica mantenida sin impacto en disponibilidad.
 
 ---
 
@@ -226,12 +243,12 @@ graph TD
 
 | Servicio               | Dependencia                    | Función Soportada                      | Tipo de Interacción   |
 | ---------------------- | ------------------------------ | -------------------------------------- | --------------------- |
+| **BFF Layer**          | Proxy de autenticación         | Adaptación de flujos por tipo de cliente | OIDC + Tokens         |
 | **Governance Service** | Identidad, autenticación, QR   | Procesos de asamblea, quórum, votación | Directa OIDC / Tokens |
+| **Streaming Service**  | **Solo display QR**            | Muestra QR para escaneo en asambleas   | API Tokens Contextuales |
 | **Compliance Service** | Políticas y DSAR               | Validación regulatoria runtime         | Bidireccional         |
 | **Finance Service**    | Autenticación fuerte           | Cobros y transferencias seguras        | OIDC + JWT            |
 | **Payroll Service**    | Acceso autorizado              | Gestión de nómina y RRHH               | RBAC + DSAR           |
-| **HR Service**         | Identidad laboral              | Alta/Baja de empleados                 | API Token Auth        |
-| **Asset Management**   | Identificación del propietario | Gestión de bienes y mantenimiento      | PBAC contextual       |
 
 ---
 
@@ -245,6 +262,7 @@ graph TD
 | **Token Sender-Constrained (DPoP)** | Prevención de replay attacks.                |
 | **Logs WORM**                       | Evidencias inmutables con hash-chain.        |
 | **Cumplimiento DSAR / GDPR / LGPD** | Ejecución orquestada y validada por tenant.  |
+| **Algoritmos Asimétricos Exclusivos** | **ES256/EdDSA obligatorios, HS256 prohibido** |
 
 ---
 
@@ -257,16 +275,16 @@ graph TD
 | Disponibilidad | SLA anual           | ≥99.95% | Mensual    |
 | DSAR           | Resolución completa | ≤72h    | Diario     |
 | Auditoría      | Eventos firmados    | 100%    | Continuo   |
+| JWKS Cache     | Sincronización      | ≤5min   | Continuo   |
 
 ---
 
 ## 🗺️ 9. Roadmap Técnico
 
-| Fase                                      | Objetivo                                       | Entregables                         |
-| ----------------------------------------- | ---------------------------------------------- | ----------------------------------- |
-| **Fase 1 — Core Identity (Q4 2025)**      | WebAuthn, OIDC completo, sesiones distribuidas | API estable y cumplimiento inicial  |
-| **Fase 2 — Compliance Runtime (Q1 2026)** | OPA/Cedar, DSAR cross-service, rotación 90d    | Operación validada y auditable      |
-| **Fase 3 — Global Expansion (Q2 2026)**   | Multi-región, certificaciones ISO, eIDAS       | Despliegue internacional SmartEdify |
+| Fase                                      | Objetivos Clave                                                                 |
+| ----------------------------------------- | ------------------------------------------------------------------------------- |
+| **Fase 1 — Core Identity Foundation**     | WebAuthn + OIDC completo + Sesiones distribuidas + Políticas OPA/Cedar + DSAR cross-service |
+| **Fase 2 — Global Expansion**             | Multi-región + Certificaciones ISO + eIDAS + Optimización de desempeño global   |
 
 ---
 
@@ -289,6 +307,17 @@ El **Identity Service** es el eje de confianza y control en la plataforma SmartE
 Combina autenticación biométrica moderna, autorización contextual y cumplimiento regulatorio automatizado.
 Su arquitectura final garantiza interoperabilidad, seguridad criptográfica y cumplimiento multi-país en entornos de alta demanda.
 
+**🔐 Responsabilidades Clave Confirmadas:**
+- **Único emisor y validador** de tokens QR contextuales
+- **Algoritmos asimétricos exclusivos** (ES256/EdDSA)
+- **PKCE obligatorio** en todos los flujos OIDC
+- **Orquestación inicial** de DSAR con compliance-service
+- **Integración completa** con BFF Layer para experiencia de cliente optimizada
+
 **Estado final del producto:** 🟩 *Listo para despliegue productivo y expansión internacional.*
 
 ---
+
+**Aprobado por:** CTO SmartEdify Global  
+**Fecha:** Octubre 2025  
+**Versión del Documento:** 1.1 - Alineado con arquitectura BFF y roadmap unificado
