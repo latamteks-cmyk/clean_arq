@@ -15,16 +15,20 @@
 
 ### **Propósito**
 
-El `identity-service` es el proveedor central de identidad, autenticación, autorización y trazabilidad del ecosistema SmartEdify.
-Asegura que toda interacción digital sea **irrefutable, auditable y legalmente válida**, habilitando la confianza y cumplimiento en procesos de gobernanza condominal y operaciones administrativas.
+El identity-service es el proveedor central de identidad y autenticación de la plataforma SmartEdify.
+Garantiza que todo acceso, sesión o transacción sea seguro, auditable y legalmente válido, soportando una operación multi-tenant y multi-jurisdiccional.
 
 ### **Objetivos Estratégicos**
 
-* Garantizar autenticación fuerte (AAL2/AAL3) en todos los contextos.
-* Proveer control centralizado de acceso y sesiones en un entorno multi-tenant.
+* Gestionar autenticación, sesiones y tokens con cumplimiento normativo.
+* Asegurar interoperabilidad entre microservicios mediante estándares OIDC/OAuth2
+* Permitir registro delegado controlado y activación segura por invitación.
+* Garantizar AAL2/AAL3 para usuarios y operaciones de riesgo; para M2M, mTLS/private_key_jwt + DPoP.
+* Centralizar decisiones de acceso y gestión de sesiones, con enforcement distribuido en Gateway/servicios.
 * Integrar cumplimiento regulatorio transnacional en tiempo de ejecución.
 * Ofrecer una API consistente, segura y verificable para todos los servicios dependientes.
 * Soportar escalabilidad global con resiliencia criptográfica y auditoría inmutable.
+* Proveer trazabilidad inmutable de accesos y acciones críticas.
 
 ---
 
@@ -38,7 +42,7 @@ El identity-service autentica y emite credenciales para **todos los principios**
 | human.operator | Administrador, Guardia, Auditor/DPO | WebAuthn + MFA reforzado | + group_ids, org_unit | Gestión de quórum, revocación, auditoría |
 | service.principal | Microservicios internos | mTLS + private_key_jwt + DPoP | sub=client_id, aud, scp | Llamadas entre servicios, validación de tokens |
 | external.app | Integraciones de terceros | private_key_jwt + PKCE | aud, scp, jwk thumbprint | Integraciones partner controladas |
-| device | Dispositivo atado | DPoP obligatorio | cnf.jkt, device_id | Validación de QR/PoP, kioscos/torniquetes |
+| device | Dispositivo atado | DPoP obligatorio | cnf.jkt, device_id | Validación de QR/PoP o acceso físico |
 
 **Nota:** los **roles y permisos** no se definen en identity-service. Se consultan en `user-profiles-service` y se incluyen como `role_ids/entitlements` en los tokens. El PDP (OPA/Cedar) evalúa acceso con RBAC+ABAC+ReBAC.
 
@@ -53,9 +57,10 @@ El `identity-service` adopta un modelo **Zero Trust + Event-Driven + Policy-Base
 
 1. **Capa de Presentación:** BFF Layer especializado por cliente
 2. **Capa de Exposición:** API Gateway (8080) con PEP (Policy Enforcement Point)
-3. **Capa de Identidad:** Núcleo OIDC/OAuth2 + WebAuthn + DPoP
-4. **Capa de Cumplimiento:** Integración con `compliance-service` para validaciones legales y DSAR runtime
-5. **Capa de Auditoría:** Kafka y almacenamiento WORM con hash-chain
+3. **Capa de Identidad:** identity-service (OIDC/OAuth2.1, WebAuthn, DPoP).
+4. **Capa de Perfil y Roles:** user-profiles-service (atributos, grupos, relaciones).
+5. **Capa de Cumplimiento:** Integración con `compliance-service` para validaciones legales y DSAR runtime
+6. **Capa de Auditoría:** Kafka y almacenamiento WORM con hash-chain
 
 ### 3.2. Arquitectura definitiva (visión plataforma)
 
@@ -156,59 +161,60 @@ flowchart TB
 
 ### **4.1. Funcionalidades Principales**
 
-| Categoría                | Función                    | Descripción                                                       |
-| ------------------------ | -------------------------- | ----------------------------------------------------------------- |
-| **Gestión de Identidad** | Registro adaptable         | Registro configurable por tenant, con OTP y validaciones locales. |
-|                          | Consentimiento digital     | Captura y almacenamiento inmutable de consentimientos.            |
-| **Autenticación**        | WebAuthn / Passkeys        | Método principal, sin almacenamiento de biometría.                |
-|                          | TOTP / Fallback            | Alternativa AAL2 con MFA obligatorio.                             |
-| **Autorización**         | PBAC híbrido               | Políticas por rol, contexto y relación.                           |
-|                          | OPA/Cedar PDP              | Evaluación de acceso en tiempo real.                              |
-| **Sesiones**             | Gestión distribuida        | Logout global, DPoP, control por dispositivo.                     |
-|                          | Revocación instantánea     | Propagación ≤30s vía Kafka.                                       |
-| **QR Contextuales**      | **ÚNICO EMISOR Y VALIDADOR** | COSE/JWS con TTL corto para asambleas o accesos físicos.          |
-| **Cumplimiento (DSAR)**  | Portabilidad y eliminación | Cross-service con orquestación del compliance-service.            |
-| **Auditoría Legal**      | Logs WORM                  | Registro inmutable y firmado digitalmente.                        |
+| Categoría                 | Función                                      | Descripción                                                                                                                                                              |
+| ------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Gestión de Identidad**  | **Registro delegado y activación**           | El CRUD de usuarios se ejecuta en `user-profiles-service` bajo control del Administrador. `identity-service` solo gestiona invitaciones, consentimientos y activaciones. |
+|                           | **Consentimiento legal digital**             | Captura y almacenamiento WORM de consentimientos versionados.                                                                                                            |
+| **Autenticación**         | **WebAuthn / Passkeys**                      | Autenticación biométrica sin almacenar datos sensibles.                                                                                                                  |
+|                           | **TOTP / Fallback MFA**                      | Alternativa AAL2 para dispositivos no compatibles.                                                                                                                       |
+| **Autorización**          | **PBAC (RBAC+ABAC+ReBAC)**                   | Motor OPA/Cedar, evaluación contextual y fail-closed.                                                                                                                    |
+| **Sesiones**              | **Gestión distribuida y revocación global**  | Logout inmediato, DPoP obligatorio, TTL ≤10 min.                                                                                                                         |
+| **QR Contextuales**       | **Tokens firmados (COSE/JWS)**               | Usados para asambleas, accesos físicos o eventos transitorios.                                                                                                           |
+| **Cumplimiento y DSAR**   | **Portabilidad / Eliminación Cross-Service** | Coordinado por `compliance-service` en tiempo de ejecución.                                                                                                              |
+| **Auditoría y Evidencia** | **Eventos WORM en Kafka**                    | Audit trail legal e inmutable.                                                                                                                                           |
+
 
 ---
 
 ## 🚦 5. Casos de Uso Funcionales
 
-### **CU-01 Registro Adaptativo**
+### **CU-01 Registro Delegado y Activación**
 
-**Actor:** Residente / Administrador
+**Actor:** Administrador del condominio
 **Flujo:**
 
-1. Usuario envía datos de registro (email, teléfono, jurisdicción).
-2. Se valida OTP doble canal.
-3. Se registra consentimiento.
-4. Se crea entidad `user` cifrada determinísticamente.
+1. El Administrador crea usuarios (individual o masivo) desde su dashboard → user-profiles-service.
+2. identity-service genera enlace de invitación seguro (firmado, TTL corto, un solo uso).
+3. El usuario recibe correo enviado a traves de 'communication-service', verifica identidad y acepta consentimientos.
+4. Configura su método de acceso (Passkey o TOTP).
+5. identity-service marca la identidad como ACTIVA y notifica a user-profiles
+6. El usuario inicia sesión por primera vez.
 
-**Resultado:** Usuario registrado y vinculado a un tenant con política regional aplicada.
+**Resultado:** Registro controlado, cumplimiento legal y onboarding seguro.
 
 ---
 
-### **CU-02 Autenticación Segura (WebAuthn)**
+### **CU-02 Autenticación Fuerte**
 
 **Actor:** Usuario final o sistema interno
 **Flujo:**
 
-1. Usuario inicia autenticación WebAuthn.
-2. Se valida `credentialId` y `publicKey`.
-3. Se genera JWT + DPoP (ES256/EdDSA).
-4. Se publica evento `AuthSuccess` en Kafka.
+1. El cliente inicia el flujo /authorize (PKCE).
+2. WebAuthn/TOTP según tipo de usuario y nivel de aseguramiento.
+3. Se emiten tokens firmados (ES256/EdDSA, kid, DPoP).
+4. Eventos de autenticación se registran en Kafka.
 
-**Resultado:** Sesión autenticada, válida para 10 minutos y atada al dispositivo.
+**Resultado:** Sesión autenticada, trazada y segura.
 
 ---
 
 ### **CU-03 Autorización Contextual**
 
-**Actor:** Microservicio dependiente
+**Actor:** API Gateway, PDP (OPA/Cedar)
 **Flujo:**
 
-1. Solicitud llega con token DPoP y `tenant_id`.
-2. PEP consulta OPA/Cedar con atributos de usuario, recurso y contexto.
+1. Cada solicitud pasa por el PEP del Gateway
+2. El PDP evalúa las políticas combinando claims (role_ids, entitlements) con contexto (hora, ubicación, dispositivo).
 3. Respuesta `Permit/Deny` firmada y cacheada (TTL ≤5min).
 
 **Resultado:** Autorización evaluada en tiempo real, auditable y coherente entre regiones.
@@ -221,9 +227,9 @@ flowchart TB
 **Flujo:**
 
 1. Governance solicita QR firmado al identity-service.
-2. **Identity genera COSE/JWS (`kid`, `ttl=300s`) - ÚNICO EMISOR**.
+2. Identity emite el token COSE/JWS firmado (ES256) con kid y iss canónico por tenant, TTL=300 s. Único emisor: ningún otro servicio puede firmar tokens contextuales.
 3. Streaming-service muestra QR para escaneo.
-4. Guardia valida QR con `/validate` + DPoP.
+4. El servicio validador 'governance' ejecuta /validate con DPoP y verifica firma, aud, exp, cnf.
 5. Evento `AccessValidated` registrado en Kafka.
 
 **Resultado:** Acceso físico o digital validado con respaldo legal y técnico.
@@ -251,41 +257,46 @@ flowchart TB
 
 1. Usuario solicita `DELETE /privacy/data`.
 2. Identity crea `job_id` y publica `DataDeletionRequested`.
-3. **Compliance-service orquesta crypto-erase en governance-service y otros**.
-4. Todos los servicios confirman eliminación y firman estado.
+3. **Compliance-service orquesta crypto-erase en governance-service coordina eliminación en todos los servicios dependientes**.
+4. Resultado notificado vía webhook.
 
 **Resultado:** Eliminación completa del usuario con registro de cumplimiento.
 
 ---
 
-### **CU-07 Rotación de Claves y Validación**
+### **CU-07 Recuperación o Reemplazo de Claves de Firma (Evento Controlado)**
 
-**Actor:** Infraestructura / Seguridad
+**Actor:** Equipo de Seguridad / Infraestructura
 **Flujo:**
 
-1. Cada 90 días se rota la clave ES256/EdDSA.
-2. JWKS publica nuevas y antiguas claves (rollover 7d).
-3. **Gateway-service sincroniza caché ≤5min (REQUISITO P0)**.
-4. Validación continua sin interrupciones.
+1. **Detección o decisión de reemplazo**. Puede originarse por auditoría, compromiso detectado, fallo HSM/KMS o requerimiento normativo
+2. **Revocación de clave comprometida** Se marca kid afectado como revocado en JWKS y se actualiza el estado en el sistema de claves (KMS o HSM). y Se genera evento KeyRevoked en Kafka
+3. **Generación de nueva clave**. Creación controlada mediante HSM o KMS (ES256/EdDSA). y Registro del nuevo kid y publicación inmediata en JWKS.
+4. **Comunicación a consumidores**. 'identity-service' publica notificación 'KeyRolloverInitiated'. 'API Gateway', 'governance-service', 'physical-security-service' y otros validadores sincronizan JWKS.
+5. **Reemisión de tokens válidos**. Se fuerzan nuevas firmas con la clave nueva para sesiones activas críticas. y Tokens firmados con la clave revocada quedan inválidos desde 'not_before'.
+6. **Verificación post-cambio**. Validación cruzada en todos los validadores (ok para nueva clave, error para revocada). y Auditoría 'KeyChangeCompleted'.
 
-**Resultado:** Seguridad criptográfica mantenida sin impacto en disponibilidad.
-
+**Resultado:** Cadena de confianza restablecida. No se pierde trazabilidad, y todos los validadores sincronizan la nueva clave en ≤5 minutos.
 ---
 
 ## 🧩 6. Servicios Integrados y Responsabilidades
 
-| Servicio               | Dependencia                    | Función Soportada                      | Tipo de Interacción   |
-| ---------------------- | ------------------------------ | -------------------------------------- | --------------------- |
-| **BFF Layer**          | Proxy de autenticación         | Adaptación de flujos por tipo de cliente | OIDC + Tokens         |
-| **Governance Service** | Identidad, autenticación, QR   | Procesos de asamblea, quórum, votación | Directa OIDC / Tokens |
-| **Streaming Service**  | **Solo display QR**            | Muestra QR para escaneo en asambleas   | API Tokens Contextuales |
-| **Compliance Service** | Políticas y DSAR               | Validación regulatoria runtime         | Bidireccional         |
-| **Finance Service**    | Autenticación fuerte           | Cobros y transferencias seguras        | OIDC + JWT            |
-| **Payroll Service**    | Acceso autorizado              | Gestión de nómina y RRHH               | RBAC + DSAR           |
+| Servicio                    | Dependencia    | Función Soportada                                        | Tipo de Interacción |
+| --------------------------- | -------------- | -------------------------------------------------------- | ------------------- |
+| **User Profiles**           | Corresponsable | CRUD de usuarios, roles, relaciones, activación delegada | Bidireccional       |
+| **Governance**              | Dependiente    | Procesos de asamblea, quórum, votación, QR               | OIDC + JWT          |
+| **Compliance**              | Dependiente    | Validación legal, DSAR runtime                           | Bidireccional       |
+| **Finance**                 | Dependiente    | Autenticación transaccional y antifraude                 | OIDC                |
+| **Payroll**                 | Dependiente    | Gestión de identidad laboral                             | RBAC + DSAR         |
+| **HR Compliance**           | Dependiente    | Validaciones regulatorias                                | API segura          |
+| **Asset Management**        | Dependiente    | Acceso y autenticación contextual                        | PBAC                |
+| **Physical Security**       | Dependiente    | Validación de QR de acceso                               | COSE/JWS + DPoP     |
+| **Marketplace / Analytics** | Dependiente    | Acceso autenticado y multi-tenant                        | OIDC federado       |
 
 ---
 
-## 🔐 7. Seguridad y Cumplimiento
+## 🔐 7. SeguridadZero Trust Architecture: autenticación y autorización continua. y Cumplimiento
+
 
 | Mecanismo                           | Descripción                                  |
 | ----------------------------------- | -------------------------------------------- |
