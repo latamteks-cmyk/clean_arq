@@ -2,7 +2,7 @@
 
 ## **Identity Service — SmartEdify Platform**
 
-**Versión:** 4.0 (Final)
+**Versión:** 0.0
 **Estado:** Aprobado para ejecución y despliegue multirregional
 **Fecha:** Octubre 2025
 **Autor:** Product Owner — Identity Service
