@@ -372,8 +372,7 @@ En caso de partición, validación local priorizada; sincronización diferida po
 | QA                 | Pruebas AAL, OIDC, DSAR y auditoría     |
 
 ---
-
-##📋 12. Consideraciones Finales
+## 📋 12. Consideraciones Finales
 
 Los cambios introducen resiliencia multirregional, aislamiento criptográfico por tenant/región y autenticación reforzada.
 Todos los mecanismos se ajustan a NIST 800-63-4, RFC 9449 (DPoP) y ISO 27001 Annex A.10.
