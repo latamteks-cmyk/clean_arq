@@ -1,5 +1,3 @@
-
-<img src="../branding/Logo_smartedify.jpg" width="100" />
 ```mermaid
 ---
 title: "Roadmap de Artefactos/Documentos/ADRs — SmartEdify v2.1"
