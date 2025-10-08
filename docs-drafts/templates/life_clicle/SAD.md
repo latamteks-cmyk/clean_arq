@@ -146,6 +146,114 @@ flowchart TB
 2. Asset Management registra incidencia u OT.
 3. Puede anexar evidencia a `documents-service`.
 
+## 5.4) Onboarding jurídico de condominio y tablero
+
+**Actores:** Admin Tenant, Tenancy, Compliance, User-Profiles, Governance.
+**Flujo:** crear `condominium` → adjuntar reglamento/jurisdicción → Compliance publica bundle overlay → asignar **cargos oficiales** (Presidente/Secretario) con vigencia → Governance habilita convocatorias.
+**Post:** `policy_version` activa; `official_roles` vigentes.
+
+## 5.5) Gestión de cargos oficiales y vacancias
+
+**Actores:** User-Profiles, Governance, Compliance.
+**Flujo:** nombramiento/renuncia → `OfficialRoleAssigned/Revoked` → Compliance valida quorum de la resolución → boletín `RoleUpdateIssued` → Governance revalida firmantes.
+**Post:** solo cargos vigentes pueden firmar actas.
+
+## 5.6) Boletines de cumplimiento aplicados y reconciliación
+
+**Actores:** Compliance, Finance, User-Profiles, Reservations.
+**Flujo:** `PolicyUpdateIssued` o `TariffScheduleUpdated` → consumidores aplican comando idempotente → job de reconciliación compara `policy_version_skew`.
+**Post:** configuración coherente por condominio.
+
+## 5.7) Tarificación de áreas comunes end-to-end
+
+**Actores:** Compliance, Finance, Reservations.
+**Flujo:** cambio de tarifa por estatuto → boletín → Finance actualiza tabla de tarifas → Reservations cotiza y cobra nueva tarifa desde `effective_from`.
+**Post:** reservas futuras usan nueva tarifa; auditoría del cambio.
+
+## 5.8) Ciclo de facturación y cobranza condominal
+
+**Actores:** Finance, Notifications, Documents.
+**Flujo:** generación de cuotas → emisión de facturas → envío de recordatorios → conciliación bancaria → estado de cuenta.
+**Post:** eventos `InvoiceIssued`, `PaymentPosted`, aging actualizado.
+
+## 5.9) Ciclo de nómina regulada
+
+**Actores:** HR-Compliance, Payroll, Finance, Compliance, Documents.
+**Flujo:** validación de habilitación laboral → cálculo → `payslip` JSON → PDF → `PayrollPosted` → pagos/contabilización → exportes regulatorios por país.
+**Post:** reportes fiscales archivados (WORM si aplica).
+
+## 5.10) Identidad móvil: registro dispositivos, attestation y recuperación
+
+**Actores:** Identity, Mobile App.
+**Flujo:** registro de passkey con attestation (bloqueo root/jailbreak) → registro de token push → **recuperación de passkey** vía canal reforzado (ADR-002).
+**Post:** `device_attestation_failure_rate` medido; fallback TOTP device-bound.
+
+## 5.11) Identity-QR en asamblea híbrida con verificación pública
+
+**Actores:** Identity, Governance, Documents.
+**Flujo:** emisión de QR efímero → validación con DPoP → cierre de asamblea → acta; si requiere firma PSC, orquestación selectiva → endpoint `verify/quorum-hash`.
+**Post:** evidencia pública verificable.
+
+## 5.12) Asset-QR offline y sincronización de OT
+
+**Actores:** Asset-Management, Mobile App, Documents.
+**Flujo:** lectura QR sin red → cache local → inicio OT en cola → sync al recuperar conectividad → adjuntos a Documents.
+**Post:** orden trazable con sellos temporales.
+
+## 5.13) DSAR orquestado cross-service
+
+**Actores:** Identity, Compliance, Documents, todos los servicios.
+**Flujo:** `POST /privacy/export|data` → `job_id` → eventos → colecciones por servicio → entrega con expiración 48h → idempotencia en reintentos.
+**Post:** `dsar_jobs` completados y auditados.
+
+## 5.14) Rotación de claves y JWKS rollover operativo
+
+**Actores:** Identity, Gateway, Validadores.
+**Flujo:** rotación 90d → JWKS con 2 claves 7d → caché ≤5m → validación con `kid` → retiro de clave vieja.
+**Post:** cero downtime en validación de tokens.
+
+## 5.15) Introspección y revocación endurecidas
+
+**Actores:** Gateway, Identity.
+**Flujo:** `introspect` y `revoke` con mTLS/private_key_jwt; **DPoP-Nonce** cuando el cliente es BFF → respuesta Problem+RFC7807 con códigos (`invalid_dpop_proof`, `reused_refresh_token`).
+**Post:** manejo de errores consistente.
+
+## 5.16) Suscripción de notificaciones y preferencias
+
+**Actores:** Notifications, Mobile/Web.
+**Flujo:** registro/rotación de tokens FCM/APNS → preferencias por canal → políticas anti-spam por tenant/condo.
+**Post:** delivery confiable y auditable.
+
+## 5.17) Observabilidad UX y RUM mobile-first
+
+**Actores:** BFF, Analytics.
+**Flujo:** captura `app_start`, `interaction_latency`, `error_rate` con contexto `{tenant, condo}` → tableros.
+**Post:** SLOs de UX visibles por condominio.
+
+## 5.18) CDC Tenancy→Identity para caché de condo/tenant
+
+**Actores:** Tenancy, Identity.
+**Flujo:** Debezium emite cambios → `tenant_condo_cache` en Identity → decisiones rápidas sin cross-calls.
+**Post:** menor latencia y acople.
+
+## 5.19) Gestión documental con firma selectiva
+
+**Actores:** Documents, Governance, PSC.
+**Flujo:** `requires_e_signature=true` y firmantes por **cargo** → solicitud a PSC → `sign-callback` → TSA/Hash → verificación pública.
+**Post:** documentos legales con valor probatorio.
+
+## 5.20) Reservas con resolución de conflictos
+
+**Actores:** Reservations, Asset-Management, Compliance.
+**Flujo:** intento de reserva → detección de colisión → sugerencias → confirmación con tarifa vigente.
+**Post:** `ReservationCreated/Cancelled` consistentes.
+
+## 5.21) Estrategia de fallos y DR
+
+**Actores:** Plataforma.
+**Flujo:** caída regional → failover DB/Kafka → políticas en caché siguen válidas hasta `expires_at` → colas de reintento.
+**Post:** recuperación con RTO/RPO definidos.
+
 ---
 
 ## 6. Datos y almacenamiento
@@ -292,3 +400,18 @@ Es el documento técnico de referencia para todos los **Scope-[service].md**, **
 ---
 
 **Fin del Documento de Arquitectura de Software — SmartEdify v1.1**
+
+
+
+Faltan flujos clave. Lista optimizada y cómo incorporarlos en el SAD y los Scope-[service].md:
+
+
+
+### Dónde documentar cada flujo
+
+* **SAD**: lista y diagramas de secuencia de los 18 flujos.
+* **Scope-[service].md**: pasos detallados, contratos, datos y eventos específicos.
+* **ADRs**: decisiones que habilitan los flujos (ADR-002 Passkey Recovery, ADR-004 Bundles firmados, ADR-005 EdDSA, ADR-011 métricas de validación, rotación de claves).
+* **OpenAPI/DBML**: reflejar endpoints, esquemas y tablas involucradas.
+
+¿Genero los diagramas de secuencia (Mermaid) para estos flujos y los inserto en el SAD y en los Scope por servicio?
