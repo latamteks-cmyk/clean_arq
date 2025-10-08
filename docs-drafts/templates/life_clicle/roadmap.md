@@ -1,4 +1,4 @@
-´´´mermaid
+```mermaid
 ---
 title: "Roadmap de Artefactos/Documentos/ADRs — SmartEdify v2.1"
 config:
@@ -63,5 +63,4 @@ gantt
     DBML-Global Federado (consolidado multi-servicio)             :e2, after e1, 12d
     API-Registry v2.0 (corporativo)                               :e3, after e2, 10d
     Manual de Operación Corporativo (SRE/CTO)                     :e4, after e3, 10d
-    milestone GATE-5: Cierre Programa (Operación Gobernada)       :mil5, after e4, 0d
-´´´
+```
