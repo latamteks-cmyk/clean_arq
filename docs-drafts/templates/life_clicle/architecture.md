@@ -1,4 +1,4 @@
-'''mermaid
+```mermaid
 ---
 config:
   layout: elk
@@ -160,4 +160,4 @@ flowchart TB
  classDef operations fill:#f1f8e9,stroke:#33691e,color:#000
  classDef business fill:#e0f2f1,stroke:#004d40,color:#000
  classDef platform fill:#f5f5f5,stroke:#424242,color:#000
-'''
+```
