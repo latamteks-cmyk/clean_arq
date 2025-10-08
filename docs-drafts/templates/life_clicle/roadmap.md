@@ -64,3 +64,66 @@ gantt
     API-Registry v2.0 (corporativo)                               :e3, after e2, 10d
     Manual de Operación Corporativo (SRE/CTO)                     :e4, after e3, 10d
 ```
+```mermaid
+---
+title: "Estrategia de Desarrollo de Artefactos — SmartEdify v2.2"
+config:
+  layout: grid
+---
+flowchart TD
+
+    %% ===================== FASES PRINCIPALES =====================
+    subgraph P["🧩 Planificación"]
+        D1["Definir Alcance y Servicios Core<br/>📘 Documento de Visión"]
+        D2["📐 Documento de Arquitectura Base<br/> (SAD-001)"]
+        D3["📄 ADRs iniciales 001–005<br/> (decisiones técnicas base)"]
+        D4["📊 Roadmap de Artefactos y Entregables"]
+        C1["✅ Checkpoint 1: Comité de Arquitectura<br/>Aprueba fase de planificación"]
+    end
+
+    subgraph D["⚙️ Desarrollo"]
+        A1["🧱 OpenAPI 3.1 inicial (identity, tenancy)"]
+        A2["🗄️ DBML inicial (modelo lógico y RLS)"]
+        A3["🔧 CI/CD Base (build + scan + deploy)"]
+        A4["📜 ADRs 006–010 (caching, resiliencia, seguridad)"]
+        A5["📗 Threat Model STRIDE/LINDDUN"]
+        C2["✅ Checkpoint 2: QA y Seguridad aprueban artefactos desarrollados"]
+    end
+
+    subgraph T["🧪 Pruebas"]
+        B1["🔬 Validación de APIs con Schema Contract"]
+        B2["🧠 Pruebas de Integración Kafka + OPA + Redis"]
+        B3["📈 Validación SLOs (latencia, revocación, cache_hit_ratio)"]
+        B4["🔁 Simulaciones DSAR y Compliance-runtime"]
+        C3["✅ Checkpoint 3: Integración completa y CI/CD verificado"]
+    end
+
+    subgraph DEP["🚀 Despliegue"]
+        E1["🌐 Observabilidad completa (OTEL + Grafana + Prometheus)"]
+        E2["🧩 Publicación de Catálogo de APIs v1.0"]
+        E3["🧱 Estrategia de Caching Regional (Redis per-region)"]
+        E4["🧰 Runbook DevSecOps + Runbook Resiliencia"]
+        C4["✅ Checkpoint 4: SRE valida estabilidad y resiliencia"]
+    end
+
+    subgraph OP["🏗️ Operación"]
+        F1["📚 Gobierno de Artefactos (versionado semántico + ADR Workflow)"]
+        F2["🗃️ Modelo Federado DBML Global"]
+        F3["🔐 Monitoreo de Seguridad + Métricas (token_error_rate, revocation_latency)"]
+        F4["📘 Manual de Operación Corporativo (SRE + CTO)"]
+        C5["✅ Checkpoint 5: Operación Gobernada y Documentada"]
+    end
+
+    %% ===================== TRANSICIONES =====================
+    P -->|GATE 1 → Desarrollo| D
+    D -->|GATE 2 → QA/Sec| T
+    T -->|GATE 3 → Preproducción| DEP
+    DEP -->|GATE 4 → Producción| OP
+    OP -->|Evolución y Auditorías| P
+
+    %% ===================== ESTILOS =====================
+    classDef fase fill:#f9f9f9,stroke:#555,stroke-width:1px,color:#000;
+    classDef checkpoint fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#000,font-weight:bold;
+    class P,D,T,DEP,OP fase;
+    class C1,C2,C3,C4,C5 checkpoint;
+```
